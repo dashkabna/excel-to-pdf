@@ -5,10 +5,11 @@ import { AppError } from '../../lib/appError.js'
 import { ok } from '../../lib/response.js'
 import { logoRateLimiter, pdfRateLimiter } from '../../middleware/rateLimiter.js'
 import { validate } from '../../middleware/validate.js'
-import { statementPdfSchema, type StatementPdfInput } from './statement.schema.js'
+import { STATEMENT_LIMITS, statementPdfSchema, type StatementPdfInput } from './statement.schema.js'
 import { statementService } from './statement.service.js'
 import { LOGO_LIMITS, statementLogoService } from './statement.logo.js'
-import { sha256Hex } from './statement.verification.js'
+import { QR_LINK_MAX, defaultQrLink, sha256Hex } from './statement.verification.js'
+import { env } from '../../config/env.js'
 
 /** Нэвтрэлтгүй (хэрэглэгчийн шийдвэр, 2026-11-13) — хүсэлтийг IP-ээр хязгаарлаж, аудитад IP хадгална. */
 export const statementRouter = Router()
@@ -41,6 +42,20 @@ const readLogoFile = (req: Request, res: Response) =>
       resolve(req.file)
     })
   })
+
+/** Вэбийн шалгалт серверийнхтэй ижил байхын тулд QR-ийн зөвшөөрсөн домэйн, хязгаарыг өгнө. */
+statementRouter.get('/statement-report/config', (_req, res) => {
+  ok(res, {
+    qrAllowedHosts: env.QR_ALLOWED_HOSTS,
+    defaultQrLink: defaultQrLink(),
+    limits: {
+      verificationTextChars: STATEMENT_LIMITS.verificationTextChars,
+      verificationTextLines: STATEMENT_LIMITS.verificationTextLines,
+      qrLinkChars: QR_LINK_MAX,
+      footerTextChars: STATEMENT_LIMITS.footerTextChars,
+    },
+  })
+})
 
 /** Урьдчилан харагдацад ашиглана. */
 statementRouter.get('/statement-report/logo', (async (_req, res) => {

@@ -80,11 +80,14 @@ const Spacer = ({ colSpan, height }: { colSpan: number; height: number }) => (
 export function StatementPreview({
   payload,
   footer,
+  footerNote = '',
   header,
   afterContent,
 }: {
   payload: StatementReportPayload
   footer: string
+  /** Хэрэглэгчийн хөлийн текст — хөлийн зураасны дээр нэг мөрөөр (PDF шиг). */
+  footerNote?: string
   header: ReactNode
   /** Хүснэгт/хураангуйн доор (баталгаажуулах QR). */
   afterContent?: ReactNode
@@ -189,10 +192,19 @@ export function StatementPreview({
           ) : null}
           {afterContent}
 
+          {footerNote ? (
+            <div
+              className="truncate text-neutral-700"
+              data-testid="statement-footer-note"
+              style={{ marginTop: pt(16), marginLeft: pt(-6), marginRight: pt(-6), paddingBottom: pt(2), fontSize: pt(5.25) }}
+            >
+              {footerNote}
+            </div>
+          ) : null}
           <div
             className="border-t-[4px] border-double border-neutral-900 text-neutral-700"
             style={{
-              marginTop: pt(24),
+              marginTop: footerNote ? 0 : pt(24),
               marginLeft: pt(-6),
               marginRight: pt(-6),
               paddingTop: pt(7.5),

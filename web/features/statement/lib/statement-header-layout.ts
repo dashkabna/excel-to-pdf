@@ -54,7 +54,17 @@ export type TextBox = HeaderBox & { id: string; text: string }
  * Баталгаажуулах QR блок — хүснэгт/хураангуйн төгсгөлөөс `gap` pt доор, `x` нь хуудасны
  * зүүн ирмэгээс. `text` нь кодын мөр ба анхааруулгын (хоёулаа тогтмол) хооронд гарах тайлбар.
  */
-export type VerificationBox = { x: number; gap: number; size: number; w: number; fontSize: number; text: string; hidden: boolean }
+export type VerificationBox = {
+  x: number
+  gap: number
+  size: number
+  w: number
+  fontSize: number
+  text: string
+  /** QR-ийн ард орох холбоос; `{код}` нь тайлангийн баталгаажуулах кодоор солигдоно. */
+  link: string
+  hidden: boolean
+}
 export type VerificationPayload = Omit<VerificationBox, 'hidden'>
 
 export const VERIFICATION_LIMITS = {
@@ -62,23 +72,79 @@ export const VERIFICATION_LIMITS = {
   size: { min: 40, max: 200 },
   w: { min: 60, max: 842 },
   fontSize: { min: 4, max: 14 },
-  /** Серверийн STATEMENT_LIMITS.verificationTextChars / verificationTextLines. */
-  textChars: 600,
-  textLines: 8,
+  /** Серверийн STATEMENT_LIMITS.verificationTextChars / verificationTextLines / qrLinkChars / footerTextChars. */
+  textChars: 1000,
+  textLines: 20,
+  linkChars: 300,
+  footerTextChars: 150,
 } as const
 /** QR ба тайлбарын хоорондох зай, тайлбарын мөр хоорондын нэмэлт зай — серверийнхтэй ижил. */
 export const VERIFICATION_CAPTION_GAP = 8
 export const VERIFICATION_GAP_RATIO = 0.3
 export const VERIFICATION_CODE_PLACEHOLDER = 'XXXX-XXXX-XXXX-XXXX'
 
-/** QR-ийн хаяг — серверийн DEFAULT_PUBLIC_WEB_URL-тэй ижил (бүх орчинд production сайт). */
+/** QR холбоосыг уншиж чадаагүй үеийн шалгах хаяг (анхдагч холбоосын хаяг). */
 export const VERIFICATION_BASE_URL = 'https://itd.teso.mn/verify'
 
+/** QR холбоос дахь энэ тэмдэглэгээ тайлангийн баталгаажуулах кодоор солигдоно. */
+export const QR_CODE_TOKEN = '{код}'
+export const DEFAULT_QR_LINK = 'https://itd.teso.mn/verify/{код}'
+/** Холбоосыг шалгахад `{код}`-ийн оронд тавих жишээ код (API-тай ижил). */
+const SAMPLE_CODE = 'ABCDEFGHJKMNPQRS'
+
 /**
- * Тайлбар дахь энэ тэмдэглэгээг сервер шалгах хаягаар (PUBLIC_WEB_URL-аас) солино — QR-ийн
- * хаягтай үргэлж ижил. Урьдчилан харагдац VERIFICATION_BASE_URL-аар солино.
+ * Тайлбар дахь энэ тэмдэглэгээ QR холбоосын хаягаар (qrAddress) солигдоно — QR уншуулахгүй
+ * хүн гараар орох хаяг QR-тай үргэлж нэг газар заана.
  */
 export const VERIFICATION_URL_TOKEN = '{хаяг}'
+
+/**
+ * QR холбоосын шалгалт — API-ийн qrLinkError-тай үг үсгээрээ ижил. Нэвтрэлтгүй тул QR зөвхөн
+ * зөвшөөрөгдсөн (TESO-ийн) домэйн рүү заана: дурын холбоос нь хуурамч хуулгад "баталгаажуулах"
+ * мэт хуурамч сайт руу заах боломж олгоно.
+ */
+export function qrLinkError(link: string, allowedHosts: string[]): string | null {
+  const value = link.trim()
+  if (!value) return 'QR холбоос оруулна уу'
+  if (value.length > VERIFICATION_LIMITS.linkChars) return `QR холбоос ${VERIFICATION_LIMITS.linkChars} тэмдэгтээс хэтэрсэн`
+  let url: URL
+  try {
+    url = new URL(value.split(QR_CODE_TOKEN).join(SAMPLE_CODE))
+  } catch {
+    return 'QR холбоос буруу байна'
+  }
+  if (url.protocol !== 'https:') return 'QR холбоос https:// хаягаар эхлэх ёстой'
+  if (url.username || url.password) return 'QR холбоос буруу байна'
+  const host = url.hostname.toLowerCase()
+  const allowed = allowedHosts.map((h) => h.toLowerCase())
+  if (!allowed.some((h) => host === h || host.endsWith(`.${h}`))) {
+    return `QR холбоос зөвхөн ${allowedHosts.join(', ')} домэйн дээрх хаяг байна`
+  }
+  return null
+}
+
+/** Тайлбарын {хаяг}: QR холбоосоос кодыг хассан хаяг (origin + зам, query-гүй). */
+export function qrAddress(link: string): string {
+  try {
+    const u = new URL(link.trim().split(QR_CODE_TOKEN).join(''))
+    return (u.origin + u.pathname).replace(/\/+$/, '')
+  } catch {
+    return VERIFICATION_BASE_URL
+  }
+}
+
+/**
+ * Хөлийн текстийг API-тай ижил хэвийн болгоно: нэг мөр (мөр таслал, таб, удирдлагын тэмдэгт
+ * → зай), дараалсан зай нэг, хосгүй surrogate ба NUL хасна.
+ */
+export const normalizeFooterText = (text: string) =>
+  text
+    .replace(LONE_SURROGATE, '')
+    .replace(/\u0000/g, '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0001-\u001F\u007F\u0085\u2028\u2029]/g, ' ')
+    .replace(/ {2,}/g, ' ')
+    .trim()
 
 /** API-ийн PDF модуль (pdf)-ийн DEFAULT_VERIFICATION_TEXT-тэй үг үсгээрээ ижил. */
 export const defaultVerificationText = () =>
@@ -108,14 +174,14 @@ export const verificationParagraphs = (text: string) =>
     .map((line) => line.replace(/ {2,}/g, ' ').trim())
     .filter(Boolean)
 
-/** Серверийн хязгаарт багтаана: эхний 8 догол мөр, 600 тэмдэгт — урьдчилан харагдац ба PDF ижил текст харуулна. */
+/** Серверийн хязгаарт багтаана: эхний 20 догол мөр, 1000 тэмдэгт — урьдчилан харагдац ба PDF ижил текст харуулна. */
 export const clampVerificationText = (text: string) =>
   verificationParagraphs(text.slice(0, VERIFICATION_LIMITS.textChars)).slice(0, VERIFICATION_LIMITS.textLines).join('\n')
 
 /** API-ийн PDF модуль (pdf)-ийн verificationCaption-тэй ижил бүтэц: код, тайлбар, анхааруулга. */
-export const verificationCaption = (code: string, text: string) => [
+export const verificationCaption = (code: string, text: string, link: string = DEFAULT_QR_LINK) => [
   `Баталгаажуулах код: ${code}`,
-  ...verificationParagraphs(clampVerificationText(text).split(VERIFICATION_URL_TOKEN).join(VERIFICATION_BASE_URL)),
+  ...verificationParagraphs(clampVerificationText(text).split(VERIFICATION_URL_TOKEN).join(qrAddress(link))),
   VERIFICATION_DISCLAIMER,
 ]
 
@@ -237,7 +303,7 @@ export type FittedCaption = {
  * хэрэглэгчийн текстийг бүтэн мөрөөр тайрна (код ба анхааруулга үргэлж үлдэнэ).
  */
 export function fitVerificationCaption(v: VerificationBox, orientation: Orientation, measure: Measure, code = VERIFICATION_CODE_PLACEHOLDER): FittedCaption {
-  const texts = verificationCaption(code, v.text)
+  const texts = verificationCaption(code, v.text, v.link)
   const g = verificationGeometry(v, orientation)
   const pageRoom = PAGE[orientation].h - PAGE_BOTTOM - QR_PAGE_TOP
   let fontSize = v.fontSize
@@ -285,6 +351,7 @@ export const defaultVerification = (orientation: Orientation): VerificationBox =
     w: round(contentW - size - VERIFICATION_CAPTION_GAP),
     fontSize: 6,
     text: defaultVerificationText(),
+    link: DEFAULT_QR_LINK,
     hidden: false,
   }
 }
@@ -640,6 +707,7 @@ export function toVerificationPayload(v: VerificationBox, orientation: Orientati
     w: round(g.captionW),
     fontSize: round(clamp(v.fontSize, L.fontSize.min, L.fontSize.max)),
     text: clampVerificationText(v.text),
+    link: v.link.trim().slice(0, L.linkChars),
   }
 }
 
@@ -804,6 +872,7 @@ function parseVerification(raw: unknown): VerificationBox {
     fontSize: num(v.fontSize, L.fontSize.min, L.fontSize.max) ?? fallback.fontSize,
     // Хуучин хадгалсан загварт байхгүй — анхдагч тайлбар.
     text: typeof v.text === 'string' ? clampVerificationText(v.text) : fallback.text,
+    link: typeof v.link === 'string' ? v.link.slice(0, L.linkChars) : fallback.link,
     hidden: v.hidden === true,
   }
 }

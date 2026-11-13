@@ -32,7 +32,7 @@ const MARGIN = { top: 9, bottom: 51, left: 20.16, right: 29.37 }
 const CONTINUATION_TOP = 2
 /** Footer-ийн давхар зураас хүснэгтээс хоёр тийш ийм хэмжээгээр илүү гарна. */
 const FOOTER_OVERHANG = 6
-const FOOTER = { rule1: 25.73, text: 13.6 } as const
+const FOOTER = { rule1: 25.73, text: 13.6, customGap: 3 } as const
 const SIZE = { header: 6.75, logoLines: 5.63, title: 11.7, period: 6.75, th: 6, td: 6, footer: 5.25, wordmark: 22 } as const
 /** Мөр хоорондын нэмэлт зай — фонтын мөрийн өндөр дээр нэмэгдэж жишигтэй ижил алхам өгнө. */
 const GAP = { header: 2.74, logoLines: 1.78, table: 1.3 } as const
@@ -843,6 +843,7 @@ export async function renderStatementPdf(
   const footerW = footerRight - footerLeft - pageLabelW - 10
   useFont(doc, F.regular, SIZE.footer)
   const footerText = fitProvenance(doc, meta.userName, input.sourceFileName, meta.generatedAt, footerW)
+  const customFooter = input.footerText ? fitOneLine(doc, input.footerText, footerRight - footerLeft) : ''
   for (let i = range.start; i < range.start + range.count; i++) {
     doc.switchToPage(i)
     // Доод margin-аас доош бичихэд pdfkit шинэ хуудас нэмдэг тул түр 0 болгоно.
@@ -850,6 +851,13 @@ export async function renderStatementPdf(
     doc.page.margins.bottom = 0
     doubleRule(doc, footerLeft, footerRight, doc.page.height - FOOTER.rule1 - 0.5)
     useFont(doc, F.regular, SIZE.footer)
+    if (customFooter) {
+      // Хэрэглэгчийн мөр шугамын дээр; доорх "Энэхүү тайланг ... үүсгэв." мөр тогтмол хэвээр.
+      doc.text(customFooter, footerLeft, doc.page.height - FOOTER.rule1 - FOOTER.customGap - lineHeight(doc), {
+        width: footerRight - footerLeft,
+        lineBreak: false,
+      })
+    }
     const textY = doc.page.height - FOOTER.text
     doc.text(footerText, footerLeft, textY, {
       width: footerW,

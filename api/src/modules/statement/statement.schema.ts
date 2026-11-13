@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { env } from '../../config/env.js'
+import { QR_LINK_MAX, qrLinkError } from './statement.verification.js'
 
 /**
  * Body нь JSON (`express.json` 2mb хязгаартай) тул мөрийн тоог үүнээс давахгүй
@@ -16,8 +18,10 @@ export const STATEMENT_LIMITS = {
   /** Логоны "хэмжээ" (үсгийн хэмжээтэй ижил нэгж): хайрцгийн өндөр = хэмжээ × 26/22 → 120 нь ~142pt. */
   logoSize: 120,
   /** QR-ийн хажуугийн засварлах текст — мөр бүр тусдаа догол мөр. */
-  verificationTextChars: 600,
-  verificationTextLines: 8,
+  verificationTextChars: 1000,
+  verificationTextLines: 20,
+  /** Хуудас бүрийн доорх нэг мөр (тогтмол "Энэхүү тайланг ... үүсгэв." мөрийн дээр). */
+  footerTextChars: 150,
 } as const
 
 /** Хосгүй UTF-16 surrogate ба NUL нь аудитын jsonb мөрийг бичихэд алдаа өгдөг (PostgreSQL хүлээн авдаггүй). */
@@ -135,7 +139,25 @@ const verificationSchema = z.object({
     )
     .transform((paragraphs) => paragraphs.join('\n'))
     .optional(),
+  /** QR-ийн холбоосын загвар (`{код}`-той); өгөөгүй бол анхдагч шалгах хаяг. */
+  link: z
+    .string()
+    .max(QR_LINK_MAX, `QR холбоос ${QR_LINK_MAX} тэмдэгтээс хэтэрсэн`)
+    .transform((link) => link.trim())
+    .superRefine((link, ctx) => {
+      const problem = qrLinkError(link, env.QR_ALLOWED_HOSTS)
+      if (problem) ctx.addIssue({ code: z.ZodIssueCode.custom, message: problem })
+    })
+    .optional(),
 })
+
+/** Нэг мөр: удирдлагын тэмдэгт, мөр шилжилтийг зай болгож, дараалсан зайг нэг болгоно. Вэбийн normalizeFooterText-тэй ижил. */
+export const normalizeFooterText = (value: string) =>
+  stripUnstorable(value)
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001F\u007F\u0085\u2028\u2029]/g, ' ')
+    .replace(/ {2,}/g, ' ')
+    .trim()
 
 const statementBody = z
   .object({
@@ -176,6 +198,11 @@ const statementBody = z
       .default(''),
     headerLayout: headerLayoutSchema.optional(),
     verification: verificationSchema.optional(),
+    footerText: z
+      .string()
+      .max(STATEMENT_LIMITS.footerTextChars, `Хөлийн текст ${STATEMENT_LIMITS.footerTextChars} тэмдэгтээс хэтэрсэн`)
+      .transform(normalizeFooterText)
+      .default(''),
     /**
      * Урьдчилан харагдацад харуулсан логоны SHA-256 (null — логогүй). Нэвтрэлтгүй тул хэн ч
      * логог сольж болно — зөрвөл 409 буцааж хэрэглэгч шинэ логоор дахин харна.

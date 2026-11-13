@@ -38,6 +38,15 @@ export type StatementReportPayload = {
    * хэн ч логог сольж болно — зөрвөл сервер 409 буцааж, хуучин логотой PDF гарахаас сэргийлнэ.
    */
   logoSha256: string | null
+  /** Хуудас бүрийн доор, тогтмол "Энэхүү тайланг ... үүсгэв." мөрийн дээр гарах нэг мөр текст. */
+  footerText: string
+}
+
+/** Серверийн тохиргоо — QR холбоосын зөвшөөрөгдсөн домэйн ба хязгаарууд. */
+export type StatementConfig = {
+  qrAllowedHosts: string[]
+  defaultQrLink: string
+  limits: { verificationTextChars: number; verificationTextLines: number; qrLinkChars: number; footerTextChars: number }
 }
 
 export type StatementLogoFile = { blob: Blob; sha256: string | null }
@@ -55,6 +64,7 @@ async function unwrapBlobError(error: unknown) {
 }
 
 export const statementApi = {
+  config: () => api.get('/statement-report/config').then((r) => r.data.data as StatementConfig),
   /** PDF дээрх QR-ийг уншсан хэн ч ашиглана. */
   verify: (code: string) =>
     api.get(`/public/statement-reports/${encodeURIComponent(code)}`).then((r) => r.data.data as StatementVerification),

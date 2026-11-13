@@ -21,7 +21,8 @@ import {
   VERIFICATION_CAPTION_GAP,
   VERIFICATION_CODE_PLACEHOLDER,
   VERIFICATION_GAP_RATIO,
-  VERIFICATION_BASE_URL,
+  DEFAULT_QR_LINK,
+  QR_CODE_TOKEN,
   VERIFICATION_LIMITS,
   VERIFICATION_URL_TOKEN,
   createMeasure,
@@ -43,6 +44,8 @@ import {
   fitVerification,
   verificationGeometry,
   verificationParagraphs,
+  qrAddress,
+  qrLinkError,
   visibleKeys,
   withColon,
   type ElementKey,
@@ -446,7 +449,11 @@ type ToolbarProps = {
   onAddText: () => void
   onReset: () => void
   onRemove: (key: DesignerSelection) => void
+  /** QR холбоосын зөвшөөрөгдсөн домэйн (серверийн тохиргоо). */
+  qrAllowedHosts?: string[]
 }
+
+const DEFAULT_ALLOWED_HOSTS = ['teso.mn']
 
 const ALIGNS: Array<{ value: ColumnAlign; label: string; icon: typeof AlignLeft }> = [
   { value: 'left', label: 'Зүүн', icon: AlignLeft },
@@ -509,7 +516,17 @@ function NumberField({ label, value, min, max, step = 0.5, onCommit }: {
 }
 
 /** Сонгосон элементийн шинж чанар (байрлал, хэмжээ, үсэг) ба толгойн ерөнхий үйлдлүүд. */
-export function HeaderDesignToolbar({ design, orientation, content, selected, onChange, onAddText, onReset, onRemove }: ToolbarProps) {
+export function HeaderDesignToolbar({
+  design,
+  orientation,
+  content,
+  selected,
+  onChange,
+  onAddText,
+  onReset,
+  onRemove,
+  qrAllowedHosts = DEFAULT_ALLOWED_HOSTS,
+}: ToolbarProps) {
   const page = PAGE[orientation]
   const element = selected && selected !== VERIFICATION_KEY ? selected : null
   const box = element ? getBox(design, element) : null
@@ -612,7 +629,8 @@ export function HeaderDesignToolbar({ design, orientation, content, selected, on
               {fitted.fontSize}pt үсгээр хэвлэгдэнэ{fitted.clipped ? ', текстийн илүү мөрүүд тайрагдана' : ''}.
             </p>
           ) : null}
-          <VerificationTextField value={v.text} onChange={(text) => setVerification({ text })} />
+          <VerificationLinkField value={v.link} allowedHosts={qrAllowedHosts} onChange={(link) => setVerification({ link })} />
+          <VerificationTextField value={v.text} link={v.link} onChange={(text) => setVerification({ text })} />
         </div>
       ) : null}
 
@@ -736,7 +754,7 @@ export function HeaderDesignToolbar({ design, orientation, content, selected, on
  * QR-ийн хажуугийн тайлбар. Мөр бүр PDF-д тусдаа догол мөр болно; кодын мөр ба
  * "албан ёсны баримт биш" мөр тогтмол тул энд засагдахгүй.
  */
-function VerificationTextField({ value, onChange }: { value: string; onChange: (text: string) => void }) {
+function VerificationTextField({ value, link, onChange }: { value: string; link: string; onChange: (text: string) => void }) {
   const L = VERIFICATION_LIMITS
   const id = useId()
   const lines = verificationParagraphs(value).length
@@ -778,13 +796,71 @@ function VerificationTextField({ value, onChange }: { value: string; onChange: (
         className="text-[12px]"
       />
       <p id={`${id}-hint`} className="text-[11px] text-text-secondary">
-        Мөр бүр тусдаа догол мөр болно ({L.textLines} мөр хүртэл). {VERIFICATION_URL_TOKEN} нь шалгах хаягаар (
-        {VERIFICATION_BASE_URL}) солигдоно. Дээд талын &quot;Баталгаажуулах код&quot; мөр ба доод талын &quot;албан ёсны
+        Мөр бүр тусдаа догол мөр болно ({L.textLines} мөр хүртэл). {VERIFICATION_URL_TOKEN} нь QR холбоосын хаягаар (
+        {qrAddress(link)}) солигдоно. Дээд талын &quot;Баталгаажуулах код&quot; мөр ба доод талын &quot;албан ёсны
         баримт биш&quot; мөр тогтмол.
       </p>
       {over ? (
         <p id={`${id}-over`} className="text-[11px] text-[var(--color-danger)]">
           Эхний {L.textLines} мөр л хэвлэгдэнэ.
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * QR-ийн ард орох холбоос. `{код}` нь тайлангийн баталгаажуулах кодоор солигдоно; холбоос зөвхөн
+ * зөвшөөрөгдсөн домэйн дээрх https хаяг байна (сервер ижил шалгалт хийнэ).
+ */
+function VerificationLinkField({
+  value,
+  allowedHosts,
+  onChange,
+}: {
+  value: string
+  allowedHosts: string[]
+  onChange: (link: string) => void
+}) {
+  const L = VERIFICATION_LIMITS
+  const id = useId()
+  const error = qrLinkError(value, allowedHosts)
+  return (
+    <div className="basis-full space-y-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <label htmlFor={`${id}-link`} className="text-[12px] text-text-secondary">
+          QR холбоос
+        </label>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-6"
+          disabled={value === DEFAULT_QR_LINK}
+          onClick={() => onChange(DEFAULT_QR_LINK)}
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          Анхны холбоос
+        </Button>
+      </div>
+      <Input
+        id={`${id}-link`}
+        value={value}
+        maxLength={L.linkChars}
+        spellCheck={false}
+        inputMode="url"
+        aria-invalid={error ? true : undefined}
+        aria-describedby={[`${id}-link-hint`, error ? `${id}-link-error` : null].filter(Boolean).join(' ')}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-7 text-[12px]"
+      />
+      <p id={`${id}-link-hint`} className="text-[11px] text-text-secondary">
+        {QR_CODE_TOKEN} нь тайлангийн баталгаажуулах кодоор солигдоно. Холбоос https:// хаягаар эхэлж,{' '}
+        {allowedHosts.join(', ')} домэйн дээр байх ёстой.
+      </p>
+      {error ? (
+        <p id={`${id}-link-error`} role="alert" className="text-[11px] text-[var(--color-danger)]">
+          {error}
         </p>
       ) : null}
     </div>

@@ -7,6 +7,8 @@ services:
       NODE_ENV: production
       PORT: 4000
       DATA_DIR: /app/data
+      # QR-ийн холбоос зөвхөн эдгээр домэйн (ба дэд домэйн) дээр — хуурамч шалгах сайт руу заалгахгүй.
+      QR_ALLOWED_HOSTS: ${QR_ALLOWED_HOSTS:-teso.mn}
     # Зөвхөн энэ компьютероос (curl/debug) — хөтөч вэбээр дамжина. API нь зөвхөн ойрын нэг hop-д
     # (вэб) итгэдэг тул LAN-д нээвэл X-Forwarded-For-ийг хуурамчаар илгээж хязгаарыг тойрч болно.
     ports:

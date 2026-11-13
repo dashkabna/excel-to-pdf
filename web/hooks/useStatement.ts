@@ -26,6 +26,17 @@ export const useStatementReportPdf = () => {
 }
 
 /** 404 нь "бүртгэлгүй" гэсэн хариу — дахин оролдох шаардлагагүй. */
+/** QR холбоосын зөвшөөрөгдсөн домэйн (сервер env-ээр тохируулна); ачаалж байх/алдаатай үед teso.mn. */
+export const DEFAULT_QR_ALLOWED_HOSTS = ['teso.mn']
+
+export const useStatementConfig = () =>
+  useQuery({
+    queryKey: ['statement-config'],
+    queryFn: () => statementApi.config(),
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+  })
+
 export const useStatementVerification = (code: string) =>
   useQuery({
     queryKey: ['statement-verification', code],

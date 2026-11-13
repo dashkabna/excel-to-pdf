@@ -6,6 +6,20 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(4301),
   /** Лого ба тайлангийн бүртгэл (audit.jsonl) — docker-т volume. */
   DATA_DIR: z.string().min(1).default('./data'),
+  /**
+   * QR-ийн холбоос зөвхөн эдгээр домэйн (ба дэд домэйн) дээр байж болно — хэрэглэгч холбоосыг
+   * өөрчилж чадах ч хуурамч "баталгаажуулах" сайт руу заалгахгүй. Таслалаар тусгаарлана.
+   */
+  QR_ALLOWED_HOSTS: z
+    .string()
+    .default('teso.mn')
+    .transform((value) =>
+      value
+        .split(',')
+        .map((host) => host.trim().toLowerCase().replace(/^\.+|\.+$/g, ''))
+        .filter(Boolean),
+    )
+    .pipe(z.array(z.string()).min(1, 'QR_ALLOWED_HOSTS дор хаяж нэг домэйн')),
 })
 
 const parsed = schema.safeParse(process.env)

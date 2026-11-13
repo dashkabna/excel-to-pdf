@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, FileDown, FileSpreadsheet, ImageUp, Loader2, Plus, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { useStatementLogo, useStatementLogoMutations, useStatementReportPdf } from '@/hooks/useStatement'
+import {
+  DEFAULT_QR_ALLOWED_HOSTS,
+  useStatementConfig,
+  useStatementLogo,
+  useStatementLogoMutations,
+  useStatementReportPdf,
+} from '@/hooks/useStatement'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -25,12 +31,15 @@ import {
 } from './statement-header-designer'
 import { StatementPreview } from './statement-preview'
 import {
+  DEFAULT_QR_LINK,
   VERIFICATION_LIMITS,
   addTextElement,
   adaptHeaderDesign,
   createMeasure,
   defaultVerificationText,
   kindOf,
+  normalizeFooterText,
+  qrLinkError,
   resolveHeaderDesign,
   restoreHeaderDesign,
   sameHeaderLayout,
@@ -90,6 +99,10 @@ type SavedTemplate = {
   logoText: string
   /** QR-ийн хажуугийн тайлбар — байрлалаас тусдаа агуулга (null бол анхдагч). */
   verificationText: string | null
+  /** QR-ийн ард орох холбоос (null бол анхдагч). */
+  verificationLink: string | null
+  /** Хуудас бүрийн доорх нэмэлт мөр. */
+  footerText: string
   /** Толгойн дизайнерын байрлал; шалгалтыг restoreHeaderDesign хийнэ. */
   headerDesign?: SavedHeaderDesign | unknown
 }
@@ -132,6 +145,9 @@ function readTemplate(): SavedTemplate | null {
       logoText: typeof parsed.logoText === 'string' ? parsed.logoText : '',
       verificationText:
         typeof parsed.verificationText === 'string' ? parsed.verificationText.slice(0, VERIFICATION_LIMITS.textChars) : null,
+      verificationLink:
+        typeof parsed.verificationLink === 'string' ? parsed.verificationLink.slice(0, VERIFICATION_LIMITS.linkChars) : null,
+      footerText: typeof parsed.footerText === 'string' ? parsed.footerText.slice(0, VERIFICATION_LIMITS.footerTextChars) : '',
       headerDesign: parsed.headerDesign,
     }
   } catch {
@@ -228,6 +244,11 @@ export function StatementReportBuilder() {
   const [headerDesign, setHeaderDesign] = useState<HeaderDesign | null>(null)
   // Тайлбар нь гарчиг шиг агуулга — засахад толгой гар байрлалд шилжихгүй, "Анхны байрлал" устгахгүй.
   const [verificationText, setVerificationText] = useState(defaultVerificationText)
+  // QR холбоос, хөлийн текст нь мөн агуулга — тайлан бүрт өөр байж болно, загварт хадгалагдана.
+  const [verificationLink, setVerificationLink] = useState(DEFAULT_QR_LINK)
+  const [footerText, setFooterText] = useState('')
+  const config = useStatementConfig()
+  const qrAllowedHosts = config.data?.qrAllowedHosts?.length ? config.data.qrAllowedHosts : DEFAULT_QR_ALLOWED_HOSTS
   const [selectedHeaderKey, setSelectedHeaderKey] = useState<DesignerSelection | null>(null)
   const measure = useMemo(() => createMeasure(), [])
   const [parsing, setParsing] = useState(false)
@@ -250,6 +271,8 @@ export function StatementReportBuilder() {
     // Өмнөх хувилбарын загвар тайлбарыг байрлалын дотор хадгалсан байж болно.
     const text = saved.verificationText ?? restored?.verification.text
     if (text !== undefined) setVerificationText(text)
+    if (saved.verificationLink !== null) setVerificationLink(saved.verificationLink)
+    setFooterText(saved.footerText)
     setDatePattern(saved.datePattern)
     setOrientation(saved.orientation)
     setOpeningLabel(saved.openingLabel)
@@ -369,12 +392,13 @@ export function StatementReportBuilder() {
       { title, fields: visibleFields, logoLines, orientation, logo: logo ? { width: logo.width, height: logo.height } : null },
       measure,
     )
-    return { ...design, verification: { ...design.verification, text: verificationText } }
-  }, [headerDesign, title, visibleFields, logoLines, orientation, measure, logo, verificationText])
+    return { ...design, verification: { ...design.verification, text: verificationText, link: verificationLink } }
+  }, [headerDesign, title, visibleFields, logoLines, orientation, measure, logo, verificationText, verificationLink])
 
   /** Дизайнераас ирсэн өөрчлөлт: тайлбар нь тусдаа, бусад нь байрлал (гар байрлалд шилжинэ). */
   const changeHeaderDesign = (next: HeaderDesign) => {
     if (next.verification.text !== verificationText) setVerificationText(next.verification.text)
+    if (next.verification.link !== verificationLink) setVerificationLink(next.verification.link)
     if (!sameHeaderLayout(next, resolvedDesign)) setHeaderDesign(next)
   }
 
@@ -401,8 +425,9 @@ export function StatementReportBuilder() {
       ),
       verification: toVerificationPayload(resolvedDesign.verification, orientation),
       logoSha256: logo?.sha256 ?? null,
+      footerText: normalizeFooterText(footerText).slice(0, VERIFICATION_LIMITS.footerTextChars),
     }
-  }, [built, workbook, columns, openingColumn, openingValue, openingLabel, title, visibleFields, logoLines, periodStart, periodEnd, orientation, resolvedDesign, logo])
+  }, [built, workbook, columns, openingColumn, openingValue, openingLabel, title, visibleFields, logoLines, periodStart, periodEnd, orientation, resolvedDesign, logo, footerText])
 
   const bytes = useMemo(() => (payload ? payloadBytes(payload) : 0), [payload])
 
@@ -415,6 +440,10 @@ export function StatementReportBuilder() {
     }
     if (layout && layout.dataStart > layout.dataEnd) blocking.push('Эхлэх мөр дуусах мөрөөс их байна.')
     // Лого ачаалагдаагүй үед урьдчилан харагдац "TESO" бичиглэлээр байрлуулж, PDF нь зургийг тамгална.
+    if (!resolvedDesign.verification.hidden) {
+      const linkError = qrLinkError(resolvedDesign.verification.link, qrAllowedHosts)
+      if (linkError) blocking.push(`${linkError} — "Баталгаажуулах QR"-ийн тохиргоонд засна уу.`)
+    }
     if (logoQuery.isLoading) blocking.push('Байгууллагын логог ачаалж байна…')
     else if (logoQuery.isError) blocking.push('Байгууллагын логог ачаалж чадсангүй — "Тайлангийн толгой" хэсгээс дахин оролдоно уу.')
     if (Array.from(payload.periodStart).length > 40 || Array.from(payload.periodEnd).length > 40) {
@@ -476,6 +505,8 @@ export function StatementReportBuilder() {
           openingLabel,
           logoText,
           verificationText: verificationText === defaultVerificationText() ? null : verificationText,
+          verificationLink: verificationLink === DEFAULT_QR_LINK ? null : verificationLink,
+          footerText,
           // Хэрэглэгч чирээгүй бол хадгалахгүй — дараагийн удаа анхдагч байрлал агуулгатай хамт дахин өрөгдөнө.
           headerDesign: headerDesign
             ? serializeHeaderDesign(
@@ -909,6 +940,21 @@ export function StatementReportBuilder() {
                     Мөр бүрт нэг мэдээлэл, {STATEMENT_LIMITS.logoLines} мөр хүртэл. Хоосон бол зөвхөн лого харагдана.
                   </p>
                 </div>
+                <div>
+                  <Label htmlFor="statement-footer-text">Хөлийн текст</Label>
+                  <Input
+                    id="statement-footer-text"
+                    value={footerText}
+                    maxLength={VERIFICATION_LIMITS.footerTextChars}
+                    onChange={(e) => setFooterText(e.target.value)}
+                    placeholder="Жишээ нь: TESO Санхүүгийн алба · Утас: 7700-0000"
+                    aria-describedby="statement-footer-text-hint"
+                  />
+                  <p id="statement-footer-text-hint" className="mt-1 text-[12px] text-text-secondary">
+                    Хуудас бүрийн доор, хөлийн зураасны дээр нэг мөрөөр гарна ({VERIFICATION_LIMITS.footerTextChars} тэмдэгт
+                    хүртэл). Зураасны доорх &quot;Энэхүү тайланг ... үүсгэв.&quot; мөр тогтмол.
+                  </p>
+                </div>
                 <div className="space-y-2">
                   <Label>Толгойн талбарууд</Label>
                   {headerFields.map((field, i) => (
@@ -1028,10 +1074,12 @@ export function StatementReportBuilder() {
                       setSelectedHeaderKey(null)
                     }}
                     onRemove={removeHeaderElement}
+                    qrAllowedHosts={qrAllowedHosts}
                   />
                   <StatementPreview
                     payload={payload}
                     footer={footerPreview}
+                    footerNote={normalizeFooterText(footerText)}
                     header={
                       <HeaderDesignBand
                         design={resolvedDesign}

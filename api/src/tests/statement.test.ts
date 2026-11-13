@@ -838,22 +838,23 @@ describe('editable verification caption', () => {
     expect(audit.data.newData.verificationText).toBe('Дотоод хэрэгцээнд')
   })
 
-  it('rejects text over 600 characters or 8 non-empty lines (blank lines do not count)', async () => {
+  it('accepts up to 1000 characters and 20 non-empty lines, and rejects more (blank lines do not count)', async () => {
     const send = (text: string) =>
       request(app)
         .post(URL)
         .send({ ...validBody(), verification: { ...verificationBlock, text } })
-    const long = await send('а'.repeat(601))
+    expect((await send('а'.repeat(1000))).status).toBe(200)
+    const long = await send('а'.repeat(1001))
     expect(long.status).toBe(422)
-    expect(long.body.error.message).toContain('600 тэмдэгтээс')
+    expect(long.body.error.message).toContain('1000 тэмдэгтээс')
 
-    const lines = Array.from({ length: 9 }, (_, i) => `Мөр ${i + 1}`)
-    const nine = await send(lines.join('\n'))
-    expect(nine.status).toBe(422)
-    expect(nine.body.error.message).toContain('8 мөрөөс')
+    const lines = Array.from({ length: 21 }, (_, i) => `Мөр ${i + 1}`)
+    const tooMany = await send(lines.join('\n'))
+    expect(tooMany.status).toBe(422)
+    expect(tooMany.body.error.message).toContain('20 мөрөөс')
 
-    const eightWithBlanks = await send(lines.slice(0, 8).join('\n\n'))
-    expect(eightWithBlanks.status).toBe(200)
+    const twentyWithBlanks = await send(lines.slice(0, 20).join('\n\n'))
+    expect(twentyWithBlanks.status).toBe(200)
   })
 })
 
@@ -1125,5 +1126,113 @@ describe('port hardening (no login, no database)', () => {
     const latin1 = await request(app).post(URL).set('Content-Type', 'application/json; charset=latin1').send('{}')
     expect(latin1.status).toBe(415)
     expect(latin1.body.error.code).toBe('UNSUPPORTED_MEDIA_TYPE')
+  })
+})
+
+describe('editable QR link and footer text', () => {
+  const send = (extra: Record<string, unknown>) => request(app).post(URL).send({ ...validBody(1), ...extra })
+
+  it('puts the typed link with the code into the QR, uses its address for {хаяг}, and audits it', async () => {
+    const res = await send({ verification: { ...verificationBlock, link: '  https://statement.teso.mn/r?c={код}  ', text: 'Шалгах: {хаяг}' } })
+    expect(res.status).toBe(200)
+    const code = res.headers['x-verification-code']
+    const audit = (await firstAudit()) as { data: { newData: Record<string, unknown> } }
+    expect(audit.data.newData.qrUrl).toBe(`https://statement.teso.mn/r?c=${code}`)
+    expect(audit.data.newData.verificationText).toBe('Шалгах: https://statement.teso.mn/r')
+  })
+
+  it('keeps the default link when none is given', async () => {
+    const res = await send({ verification: verificationBlock })
+    const audit = (await firstAudit()) as { data: { newData: Record<string, unknown> } }
+    expect(audit.data.newData.qrUrl).toBe(`https://itd.teso.mn/verify/${res.headers['x-verification-code']}`)
+  })
+
+  it('rejects links that could point a QR at a look-alike verification site', async () => {
+    const cases: Array<[string, string]> = [
+      ['http://itd.teso.mn/verify/{код}', 'https:// хаягаар эхлэх ёстой'],
+      ['https://evil.com/verify/{код}', 'зөвхөн teso.mn домэйн'],
+      ['https://teso.mn.evil.com/{код}', 'зөвхөн teso.mn домэйн'],
+      ['https://evilteso.mn/{код}', 'зөвхөн teso.mn домэйн'],
+      ['https://user:pass@itd.teso.mn/{код}', 'QR холбоос буруу байна'],
+      ['not a link', 'QR холбоос буруу байна'],
+      ['   ', 'QR холбоос оруулна уу'],
+      [`https://itd.teso.mn/${'a'.repeat(300)}`, '300 тэмдэгтээс хэтэрсэн'],
+    ]
+    for (const [link, message] of cases) {
+      const res = await send({ verification: { ...verificationBlock, link } })
+      expect(res.status, link).toBe(422)
+      expect(res.body.error.message, link).toContain(message)
+    }
+    expect(await auditEntries()).toHaveLength(0)
+  })
+
+  it('accepts other domains only when the server allows them (QR_ALLOWED_HOSTS)', async () => {
+    const saved = env.QR_ALLOWED_HOSTS
+    env.QR_ALLOWED_HOSTS = ['teso.mn', 'example.org']
+    try {
+      expect((await send({ verification: { ...verificationBlock, link: 'https://verify.example.org/{код}' } })).status).toBe(200)
+      const config = await request(app).get('/api/v1/statement-report/config')
+      expect(config.body.data).toEqual({
+        qrAllowedHosts: ['teso.mn', 'example.org'],
+        defaultQrLink: 'https://itd.teso.mn/verify/{код}',
+        limits: { verificationTextChars: 1000, verificationTextLines: 20, qrLinkChars: 300, footerTextChars: 150 },
+      })
+    } finally {
+      env.QR_ALLOWED_HOSTS = saved
+    }
+  })
+
+  it('prints the footer text on every page above the fixed generated-from line, normalised to one line', async () => {
+    const text = vi.spyOn(PDFDocument.prototype, 'text')
+    try {
+      const input = statementPdfSchema.parse({ body: { ...validBody(400), footerText: '  Санхүүгийн алба\n\tУтас:   7700-1234 ' } }).body
+      expect(input.footerText).toBe('Санхүүгийн алба Утас: 7700-1234')
+      const { pageCount } = await renderStatementPdf(input, { userName: null, generatedAt: new Date() })
+      const calls = text.mock.calls.map(([t, , y]) => ({ text: String(t), y: Number(y) }))
+      const custom = calls.filter((c) => c.text === 'Санхүүгийн алба Утас: 7700-1234')
+      const provenance = calls.filter((c) => c.text.startsWith('Энэхүү тайланг TESO ITAM системд'))
+      expect(custom).toHaveLength(pageCount)
+      expect(provenance).toHaveLength(pageCount)
+      // Хэрэглэгчийн мөр тогтмол мөрийн дээр, хүснэгтийн доод хязгаараас доор.
+      expect(custom[0]!.y).toBeLessThan(provenance[0]!.y)
+      expect(custom[0]!.y).toBeGreaterThan(841.89 - 51)
+    } finally {
+      text.mockRestore()
+    }
+    const tooLong = await send({ footerText: 'а'.repeat(151) })
+    expect(tooLong.status).toBe(422)
+    expect(tooLong.body.error.message).toContain('Хөлийн текст 150')
+    const ok = await send({ footerText: 'Дотоод хэрэгцээнд' })
+    expect(ok.status).toBe(200)
+    expect(((await auditEntries()).at(-1)!.data as { footerText: string }).footerText).toBe('Дотоод хэрэгцээнд')
+  })
+})
+
+describe('web QR link and footer helpers match the API', () => {
+  it('validates, resolves and normalises exactly like the server', async () => {
+    const web = await import('../../../web/features/statement/lib/statement-header-layout.js')
+    const { qrAddress, qrLinkError } = await import('../modules/statement/statement.verification.js')
+    const { normalizeFooterText } = await import('../modules/statement/statement.schema.js')
+    const links = [
+      'https://itd.teso.mn/verify/{код}',
+      'https://statement.teso.mn/r?c={код}',
+      'https://TESO.mn/{код}/',
+      'http://itd.teso.mn/{код}',
+      'https://evil.com/{код}',
+      'https://teso.mn.evil.com/x',
+      'https://evilteso.mn/x',
+      'https://u:p@itd.teso.mn/{код}',
+      'not a link',
+      '',
+      `https://itd.teso.mn/${'a'.repeat(300)}`,
+      'https://itd.teso.mn',
+    ]
+    for (const link of links) {
+      expect(web.qrLinkError(link, ['teso.mn']), link).toBe(qrLinkError(link, ['teso.mn']))
+      if (!qrLinkError(link, ['teso.mn'])) expect(web.qrAddress(link), link).toBe(qrAddress(link))
+    }
+    for (const value of ['  a\n\tb  ', 'x\u0000y\uD800z', 'a   b\r\nc', '\u2028line']) {
+      expect(web.normalizeFooterText(value), value).toBe(normalizeFooterText(value))
+    }
   })
 })

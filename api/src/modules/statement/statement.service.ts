@@ -7,8 +7,9 @@ import {
   createVerificationCode,
   formatVerificationCode,
   sha256Hex,
-  verificationBaseUrl,
-  verificationUrl,
+  defaultQrLink,
+  qrAddress,
+  qrUrl,
 } from './statement.verification.js'
 
 export const STATEMENT_AUDIT_ENTITY = 'StatementReport'
@@ -52,11 +53,12 @@ export const statementService = {
       throw new AppError('LOGO_CHANGED', 'Лого өөрчлөгдсөн байна — урьдчилан харагдацыг шинэчлээд дахин оролдоно уу', 409)
     }
     const code = createVerificationCode()
+    const link = input.verification?.link || defaultQrLink()
     const { buffer, pageCount } = await renderStatementPdf(input, {
       userName: null,
       logo,
       generatedAt,
-      verification: { code, url: verificationUrl(code), baseUrl: verificationBaseUrl() },
+      verification: { code, url: qrUrl(link, code), baseUrl: qrAddress(link) },
     })
     // Аудитын мөр зөвхөн файл буцаагдах үед үлдэх ёстой тул header-ийг түрүүлж бэлтгэнэ.
     const disposition = contentDisposition(input.title, generatedAt)
@@ -75,7 +77,10 @@ export const statementService = {
         pdfSha256: sha256Hex(buffer),
         hasVerificationQr: Boolean(input.verification),
         // QR-ийн хажууд яг хэвлэсэн тайлбар (өгөөгүй бол анхдагч) — хэн юу гэж бичиж хэвлэснийг бүртгэнэ.
-        verificationText: input.verification ? verificationBody(verificationBaseUrl(), input.verification.text).join('\n') : null,
+        verificationText: input.verification ? verificationBody(qrAddress(link), input.verification.text).join('\n') : null,
+        // QR-д орсон холбоос ба хэрэглэгчийн хөлийн текст — хаана заасан, юу бичсэнийг бүртгэнэ.
+        qrUrl: input.verification ? qrUrl(link, code) : null,
+        footerText: input.footerText || null,
       },
       ip: actor.ip ?? null,
     })

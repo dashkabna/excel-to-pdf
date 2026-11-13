@@ -337,15 +337,16 @@ describe('editable verification caption', () => {
     expect(reset.mock.calls[0]![0].verification.text).toBe(defaultVerificationText())
   })
 
-  it('warns that lines past the eighth are dropped and sends only what the server accepts', () => {
+  it('warns that lines past the twentieth are dropped and sends only what the server accepts (20 lines, 1000 chars)', () => {
     const base = design()
-    const lines = Array.from({ length: 10 }, (_, i) => `Мөр ${i + 1}`)
+    const lines = Array.from({ length: 22 }, (_, i) => `Мөр ${i + 1}`)
     const v = { ...base.verification, text: lines.join('\n\n') }
     toolbar({ ...base, verification: v })
-    expect(screen.getByText('10/8 мөр', { exact: false })).toBeInTheDocument()
-    expect(screen.getByText('Эхний 8 мөр л хэвлэгдэнэ.')).toBeInTheDocument()
-    expect(toVerificationPayload(v, 'portrait')!.text).toBe(lines.slice(0, 8).join('\n'))
-    expect(toVerificationPayload({ ...v, text: 'а'.repeat(700) }, 'portrait')!.text).toHaveLength(600)
+    expect(screen.getByText('22/20 мөр', { exact: false })).toBeInTheDocument()
+    expect(screen.getByText('Эхний 20 мөр л хэвлэгдэнэ.')).toBeInTheDocument()
+    expect(toVerificationPayload(v, 'portrait')!.text).toBe(lines.slice(0, 20).join('\n'))
+    expect(toVerificationPayload({ ...v, text: 'а'.repeat(1200) }, 'portrait')!.text).toHaveLength(1000)
+    expect(toVerificationPayload({ ...v, text: 'а'.repeat(900) }, 'portrait')!.text).toHaveLength(900)
   })
 
   it('shows the custom text in the preview and survives a save/restore, while older saves get the default text', () => {
@@ -407,7 +408,7 @@ describe('caption fits one page like the PDF', () => {
     const base = design()
     render(
       <HeaderDesignToolbar
-        design={{ ...base, verification: { ...base.verification, text: Array.from({ length: 9 }, (_, i) => `Мөр ${i}`).join('\n') } }}
+        design={{ ...base, verification: { ...base.verification, text: Array.from({ length: 21 }, (_, i) => `Мөр ${i}`).join('\n') } }}
         orientation="portrait"
         content={{ title: '', fields: [], logoLines: [], periodStart: '', periodEnd: '', printedDate: '' }}
         selected={VERIFICATION_KEY}
@@ -419,7 +420,7 @@ describe('caption fits one page like the PDF', () => {
     )
     const textarea = screen.getByLabelText('Тайлбарын текст')
     expect(textarea).toHaveAttribute('aria-invalid', 'true')
-    expect(textarea).toHaveAccessibleDescription(/9\/8 мөр/)
-    expect(textarea).toHaveAccessibleDescription(/Эхний 8 мөр л хэвлэгдэнэ/)
+    expect(textarea).toHaveAccessibleDescription(/21\/20 мөр/)
+    expect(textarea).toHaveAccessibleDescription(/Эхний 20 мөр л хэвлэгдэнэ/)
   })
 })
