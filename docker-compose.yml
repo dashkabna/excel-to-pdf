@@ -1,0 +1,39 @@
+services:
+  api:
+    build:
+      context: ./api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATA_DIR: /app/data
+    # Зөвхөн энэ компьютероос (curl/debug) — хөтөч вэбээр дамжина. API нь зөвхөн ойрын нэг hop-д
+    # (вэб) итгэдэг тул LAN-д нээвэл X-Forwarded-For-ийг хуурамчаар илгээж хязгаарыг тойрч болно.
+    ports:
+      - "127.0.0.1:${API_PORT:-4300}:4000"
+    volumes:
+      - statement_data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build:
+      context: ./web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      # Хөтөч зөвхөн вэб рүү хандана; /api/v1/* хүсэлтийг вэбийн route handler API руу дамжуулна.
+      API_INTERNAL_URL: http://api:4000
+      # nginx зэрэг reverse proxy-ийн ард бол true — тэр proxy-ийн X-Forwarded-For-ийг хадгална.
+      BEHIND_PROXY: ${BEHIND_PROXY:-false}
+    ports:
+      - "${WEB_PORT:-3300}:3000"
+
+volumes:
+  statement_data:

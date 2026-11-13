@@ -1,0 +1,11 @@
+{
+  "name": "teso-statement",
+  "private": true,
+  "description": "TESO Statement — API ба web-ийг нэг командаар эхлүүлэх root",
+  "scripts": {
+    "install:all": "npm --prefix api install && npm --prefix web install",
+    "dev": "node scripts/dev.mjs",
+    "test": "npm --prefix api test && npm --prefix web test",
+    "typecheck": "npm --prefix api run typecheck && npm --prefix web run typecheck"
+  }
+}
